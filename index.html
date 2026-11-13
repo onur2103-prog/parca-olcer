@@ -178,6 +178,7 @@ let dokun = [];              // elle ölçüm noktaları (mm)
 let gorus = null;            // sonuç görünümünde gösterilen bölge (düzeltilmiş px): {x, y, w}
 let taban = null;            // düzeltilmiş görüntünün canvas kopyası
 let yaziAcik = true, cizgiAcik = true;
+let labOnbellek = null, labParca = null;   // delik inceltme için
 
 // ---------- OpenCV yükleme ----------
 (function yukle(){
@@ -354,6 +355,24 @@ function olc(){
     const esik = say > (5 * S) ** 2 ? Math.max(esik0 * 0.8, top / say / 2) : esik0;
     const ikili = new Uint8Array(N);
     for (let p = 0; p < N; p++) ikili[p] = fark[p] > esik ? 255 : 0;
+    // İki renk sınıflaması: parçanın kendi rengini öğren, her pikseli parçaya mı kâğıda mı
+    // daha yakın olduğuna göre ayır. Böylece deliğin içindeki gölgeli zemin parçaya karışmaz,
+    // parçanın üstündeki gölge/yansıma da sahte delik olmaz, kenar tam ortadan geçer.
+    const dist = (i, L, A, B) => { const dL = (lab[i] - L) * 0.6, dA = lab[i + 1] - A, dB = lab[i + 2] - B; return dL * dL + dA * dA + dB * dB; };
+    let parcaRenk = null;
+    const taban2 = Math.min(esik0 * 0.4, 12) / 1.6;  // kâğıttan bu kadar az farklı olan her zaman kâğıt
+    for (let tur = 0; tur < 2; tur++){
+      let n = 0; for (let p = 0; p < N; p++) if (ikili[p]) n++;
+      if (n < (5 * S) ** 2) break;
+      const adim = Math.max(1, Math.floor(n / 30000)), pL = [], pA = [], pB = [];
+      for (let p = 0, j = 0; p < N; p++) if (ikili[p] && (j++ % adim === 0)){ const i = p * 3; pL.push(lab[i]); pA.push(lab[i + 1]); pB.push(lab[i + 2]); }
+      const rL = med(pL), rA = med(pA), rB = med(pB); parcaRenk = [rL, rA, rB];
+      if (Math.sqrt(((rL - kL) * 0.6) ** 2 + (rA - kA) ** 2 + (rB - kB) ** 2) < 6) break; // renkler ayrışmıyor
+      for (let p = 0, i = 0; p < N; p++, i += 3){
+        const dK = dist(i, kL, kA, kB);
+        ikili[p] = (dist(i, rL, rA, rB) < dK && dK > taban2 * taban2) ? 255 : 0;
+      }
+    }
     m1.delete();
     m1 = cv.matFromArray(H, W, cv.CV_8UC1, ikili);
     // kâğıt kenarından 4 mm içerisini yok say
@@ -381,14 +400,17 @@ function olc(){
     const br = cv.boundingRect(dc);
     const delikler = [];
     for (let i = hier.intPtr(0, dis)[2]; i !== -1; i = hier.intPtr(0, i)[0]){
-      const c = conts.get(i); const a = cv.contourArea(c);
+      let c = conts.get(i); const a = cv.contourArea(c);
       if (a > (1.2 * S) ** 2){
-        let cx, cy, cap, oval = false;
+        if (parcaRenk){ labOnbellek = hsv; labParca = parcaRenk; c = delikInce(c); }
+        let cx, cy, cap, oval = false, ea = 0, eb = 0;
         if (c.rows >= 5){
           const e = cv.fitEllipse(c); cx = e.center.x; cy = e.center.y;
+          e.size.width += 1; e.size.height += 1;   // kontur piksel merkezlerinden geçer: yarım piksel × 2
+          ea = Math.max(e.size.width, e.size.height) / S; eb = Math.min(e.size.width, e.size.height) / S;
           cap = (e.size.width + e.size.height) / 2; oval = Math.abs(e.size.width - e.size.height) / cap > 0.12;
         } else { const m = cv.minEnclosingCircle(c); cx = m.center.x; cy = m.center.y; cap = m.radius * 2; }
-        delikler.push({ x: cx / S, y: cy / S, cap: cap / S, oval, poly: poli(c, 0.12) });
+        delikler.push({ x: cx / S, y: cy / S, cap: cap / S, oval, ea, eb, poly: poli(c, 0.12) });
       }
       c.delete();
     }
@@ -404,6 +426,40 @@ function olc(){
     console.error(e); sonucYok('Ölçüm sırasında hata oldu. Hassasiyeti değiştirip tekrar dene. (' + (e && e.message ? e.message : (typeof e === 'number' && cv.exceptionFromPtr ? cv.exceptionFromPtr(e).msg : e)) + ')');
   } finally { gray.delete(); hsv.delete(); rgb.delete(); m1.delete(); m2.delete(); ch.delete(); conts.delete(); hier.delete(); }
 }
+// Deliği kendi rengine göre yeniden ayır: deliğin içi (gölgeli zemin) kâğıttan koyu olabilir,
+// bu yüzden genel eşik deliği büyük gösterir. Delik içi rengi ile parça rengi arasının ortasını kullan.
+function delikInce(c){
+  const W = duz.cols, H = duz.rows, m = 2 * S, r = cv.boundingRect(c);
+  const x0 = Math.max(0, r.x - m), y0 = Math.max(0, r.y - m), x1 = Math.min(W, r.x + r.width + m), y1 = Math.min(H, r.y + r.height + m);
+  const w = x1 - x0, h = y1 - y0;
+  const ic = cv.Mat.zeros(h, w, cv.CV_8UC1), dis = new cv.Mat(), vec = new cv.MatVector(), cs = new cv.MatVector(), hh = new cv.Mat();
+  try {
+    vec.push_back(c);
+    cv.drawContours(ic, vec, 0, new cv.Scalar(255), -1, cv.LINE_8, new cv.Mat(), 0, new cv.Point(-x0, -y0));
+    const kd = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(Math.round(3 * S) | 1, Math.round(3 * S) | 1));
+    cv.dilate(ic, dis, kd); kd.delete();
+    const ke = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(Math.round(1.5 * S) | 1, Math.round(1.5 * S) | 1));
+    cv.erode(ic, ic, ke); ke.delete();
+    const lab = labOnbellek.data, L = [], A = [], B = [];
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (ic.ucharPtr(y, x)[0]){ const i = ((y + y0) * W + x + x0) * 3; L.push(lab[i]); A.push(lab[i + 1]); B.push(lab[i + 2]); }
+    if (L.length < 6) return c;
+    const md = a => { a.sort((p, q) => p - q); return a[a.length >> 1]; };
+    const hL = md(L), hA = md(A), hB = md(B), [pL, pA, pB] = labParca;
+    const d = (i, l, a, b) => ((lab[i] - l) * 0.6) ** 2 + (lab[i + 1] - a) ** 2 + (lab[i + 2] - b) ** 2;
+    const yeni = cv.Mat.zeros(h, w, cv.CV_8UC1);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++){
+      if (!dis.ucharPtr(y, x)[0]) continue;
+      const i = ((y + y0) * W + x + x0) * 3;
+      if (d(i, hL, hA, hB) < d(i, pL, pA, pB)) yeni.ucharPtr(y, x)[0] = 255;
+    }
+    cv.findContours(yeni, cs, hh, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE, new cv.Point(x0, y0)); yeni.delete();
+    let en = -1, ea = 0;
+    for (let k = 0; k < cs.size(); k++){ const t = cs.get(k), a = cv.contourArea(t); if (a > ea){ ea = a; en = k; } t.delete(); }
+    const a0 = cv.contourArea(c);
+    if (en < 0 || ea < a0 * 0.5 || ea > a0 * 1.6) return c;   // mantıksız sonuç: eskisini kullan
+    c.delete(); return cs.get(en).clone();
+  } finally { ic.delete(); dis.delete(); vec.delete(); cs.delete(); hh.delete(); }
+}
 function poli(c, epsMm){ // kontur → sadeleştirilmiş nokta listesi (mm)
   const ap = new cv.Mat(); cv.approxPolyDP(c, ap, epsMm * S, true);
   const p = []; for (let i = 0; i < ap.rows; i++) p.push([ap.data32S[i * 2] / S, ap.data32S[i * 2 + 1] / S]);
@@ -415,6 +471,7 @@ function sonucYok(m){
   $('delikTablo').innerHTML = ''; ciz2();
 }
 const f1 = v => v.toLocaleString('tr-TR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const capYaz = d => d.oval ? `${f1(d.ea)}×${f1(d.eb)}` : `Ø${f1(d.cap)}`;
 function goster(){
   const o = olcum;
   $('dims').innerHTML = `
@@ -427,7 +484,7 @@ function goster(){
       // en yakın komşu delik
       let yak = null, yd = 1e9;
       o.delikler.forEach((e, j) => { if (j !== i){ const m = Math.hypot(d.x - e.x, d.y - e.y); if (m < yd){ yd = m; yak = j; } } });
-      return `<tr><td>D${i + 1}</td><td class="n">Ø ${f1(d.cap)}${d.oval ? ' <span style="color:var(--warn)">oval</span>' : ''}</td><td class="n">${yak === null ? '–' : 'D' + (yak + 1) + ': ' + f1(yd)}</td></tr>`;
+      return `<tr><td>D${i + 1}</td><td class="n">${capYaz(d)}${d.oval ? ' <span style="color:var(--warn)">oval</span>' : ''}</td><td class="n">${yak === null ? '–' : 'D' + (yak + 1) + ': ' + f1(yd)}</td></tr>`;
     }).join('');
     $('delikTablo').innerHTML = `<table><thead><tr><th>DELİK</th><th>ÇAP (mm)</th><th>EN YAKIN DELİĞE MERKEZ ARASI (mm)</th></tr></thead><tbody>${satir}</tbody></table>`;
   } else $('delikTablo').innerHTML = '';
@@ -516,7 +573,7 @@ function ciz2(){
     });
     o.delikler.forEach((d, i) => {
       const [X, Y] = P(d.x, d.y), r = d.cap / 2 * S * k + 16 * u;
-      etiket(`D${i + 1} Ø${f1(d.cap)}`, [[X, Y - r], [X, Y + r], [X + r * 1.8, Y], [X - r * 1.8, Y], [X, Y - r - 26 * u], [X, Y + r + 26 * u]], '#4fb3e8');
+      etiket(`D${i + 1} ${capYaz(d)}`, [[X, Y - r], [X, Y + r], [X + r * 1.8, Y], [X - r * 1.8, Y], [X, Y - r - 26 * u], [X, Y + r + 26 * u]], '#4fb3e8');
     });
   }
   // elle ölçüm
