@@ -168,7 +168,7 @@ footer{font-size:12px;color:var(--dim);text-align:center}
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
-const S = 4;                 // düzeltilmiş görüntüde 1 mm = 4 piksel
+const S = 8;                 // düzeltilmiş görüntüde 1 mm = 8 piksel (ince duvarlar kaybolmasın)
 const KAGIT = { a4: [210, 297], a5: [148, 210] };
 const kagitOlcu = () => {
   if (kagit !== 'ozel') return KAGIT[kagit];
@@ -217,7 +217,7 @@ $('foto').addEventListener('change', async e => {
     kaynak = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = URL.createObjectURL(f); });
   }
   w = kaynak.width; h = kaynak.height;
-  const k = Math.min(1, 1800 / Math.max(w, h));
+  const k = Math.min(1, 3200 / Math.max(w, h));
   img = document.createElement('canvas'); img.width = Math.round(w * k); img.height = Math.round(h * k);
   img.getContext('2d').drawImage(kaynak, 0, 0, img.width, img.height);
   $('s2').hidden = false; $('s3').hidden = true; $('s4').hidden = true;
@@ -311,9 +311,14 @@ try { // son seçimi hatırla
 // ---------- 3: ölç ----------
 $('olc').addEventListener('click', () => {
   if (!cvHazir){ durum('kDurum', 'Ölçüm motoru hâlâ yükleniyor, birkaç saniye bekle.', '', true); return; }
-  duzelt(); olc();
-  $('s3').hidden = false; $('s4').hidden = !olcum; ciz2(); onizle();
-  $('s3').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  durum('kDurum', 'Ölçülüyor…', '', true); $('olc').disabled = true;
+  setTimeout(() => {   // yazının ekrana çıkması için önce bir kare bekle
+    try {
+      duzelt(); olc();
+      $('s3').hidden = false; $('s4').hidden = !olcum; ciz2(); onizle();
+      $('s3').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } finally { $('olc').disabled = false; durum('kDurum', 'Ölçüldü. Köşeleri değiştirip tekrar ölçebilirsin.', 'ok'); }
+  }, 40);
 });
 function duzelt(){
   const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
@@ -388,7 +393,7 @@ function olc(){
     cv.rectangle(m1, new cv.Point(0, H - 1 - kn), new cv.Point(W - 1, H - 1), new cv.Scalar(0), -1);
     cv.rectangle(m1, new cv.Point(0, 0), new cv.Point(kn, H - 1), new cv.Scalar(0), -1);
     cv.rectangle(m1, new cv.Point(W - 1 - kn, 0), new cv.Point(W - 1, H - 1), new cv.Scalar(0), -1);
-    const k3 = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5, 5));
+    const k3 = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));   // küçük: 0,5 mm duvarı silmesin
     cv.morphologyEx(m1, m1, cv.MORPH_OPEN, k3);
     cv.morphologyEx(m1, m1, cv.MORPH_CLOSE, k3); k3.delete();
     cv.findContours(m1, conts, hier, cv.RETR_CCOMP, cv.CHAIN_APPROX_NONE);
