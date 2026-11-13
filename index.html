@@ -151,6 +151,13 @@ footer{font-size:12px;color:var(--dim);text-align:center}
       <label class="field">Delik payı (mm)<input type="number" id="pay" value="0.2" min="0" max="2" step="0.1"></label>
     </div>
     <p class="note">Delik payı, baskıda deliklerin biraz dar çıkmasını telafi eder. Dış hat aynı kalır.</p>
+    <div class="field">
+      <span>Kenar yumuşatma</span>
+      <span class="seg" id="yum"><button data-y="0">Kapalı</button><button data-y="0.4">Hafif</button><button data-y="0.8" class="on">Orta</button><button data-y="1.5">Güçlü</button></span>
+    </div>
+    <p class="note">Fotoğraftan gelen tırtıklı kenarı düzeltir: yuvarlak yerler yuvarlak, düz yerler düz çıkar. Keskin köşeler biraz yuvarlanır; köşeli parçada Hafif seç.</p>
+    <div class="stage" style="touch-action:auto"><canvas id="c3"></canvas></div>
+    <p style="font-size:13px" id="stlBilgi"></p>
     <button class="btn" id="stl">STL indir</button>
   </section>
 
@@ -305,7 +312,7 @@ try { // son seçimi hatırla
 $('olc').addEventListener('click', () => {
   if (!cvHazir){ durum('kDurum', 'Ölçüm motoru hâlâ yükleniyor, birkaç saniye bekle.', '', true); return; }
   duzelt(); olc();
-  $('s3').hidden = false; $('s4').hidden = !olcum; ciz2();
+  $('s3').hidden = false; $('s4').hidden = !olcum; ciz2(); onizle();
   $('s3').scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 function duzelt(){
@@ -410,7 +417,7 @@ function olc(){
           ea = Math.max(e.size.width, e.size.height) / S; eb = Math.min(e.size.width, e.size.height) / S;
           cap = (e.size.width + e.size.height) / 2; oval = Math.abs(e.size.width - e.size.height) / cap > 0.12;
         } else { const m = cv.minEnclosingCircle(c); cx = m.center.x; cy = m.center.y; cap = m.radius * 2; }
-        delikler.push({ x: cx / S, y: cy / S, cap: cap / S, oval, ea, eb, poly: poli(c, 0.12) });
+        delikler.push({ x: cx / S, y: cy / S, cap: cap / S, oval, ea, eb, poly: poli(c, 0.12), ham: hamNokta(c) });
       }
       c.delete();
     }
@@ -418,7 +425,7 @@ function olc(){
     olcum = {
       en: Math.max(rr.size.width, rr.size.height) / S, boy: Math.min(rr.size.width, rr.size.height) / S,
       bx: br.width / S, by: br.height / S, alan: (alan - delikler.reduce((t, d) => t + Math.PI * (d.cap / 2) ** 2 * S * S, 0)) / (S * S),
-      aci: rr.angle, rr, dis: poli(dc, 0.12), delikler,
+      aci: rr.angle, rr, dis: poli(dc, 0.12), disHam: hamNokta(dc), delikler,
     };
     dc.delete();
     goster();
@@ -460,6 +467,7 @@ function delikInce(c){
     c.delete(); return cs.get(en).clone();
   } finally { ic.delete(); dis.delete(); vec.delete(); cs.delete(); hh.delete(); }
 }
+function hamNokta(c){ const p = []; for (let i = 0; i < c.rows; i++) p.push([c.data32S[i * 2] / S, c.data32S[i * 2 + 1] / S]); return p; }
 function poli(c, epsMm){ // kontur → sadeleştirilmiş nokta listesi (mm)
   const ap = new cv.Mat(); cv.approxPolyDP(c, ap, epsMm * S, true);
   const p = []; for (let i = 0; i < ap.rows; i++) p.push([ap.data32S[i * 2] / S, ap.data32S[i * 2 + 1] / S]);
@@ -645,7 +653,7 @@ anahtar('tYazi', () => (yaziAcik = !yaziAcik));
 anahtar('tCizgi', () => (cizgiAcik = !cizgiAcik));
 addEventListener('resize', () => { if (duz && !$('s3').hidden) cizSonra(); });
 let hz;
-$('has').addEventListener('input', () => { $('hasV').textContent = $('has').value; clearTimeout(hz); hz = setTimeout(() => { if (duz){ olc(); $('s4').hidden = !olcum; } }, 250); });
+$('has').addEventListener('input', () => { $('hasV').textContent = $('has').value; clearTimeout(hz); hz = setTimeout(() => { if (duz){ olc(); $('s4').hidden = !olcum; onizle(); } }, 250); });
 
 // ---------- 4: STL ----------
 function alanIsareti(p){ let a = 0; for (let i = 0; i < p.length; i++){ const [x1, y1] = p[i], [x2, y2] = p[(i + 1) % p.length]; a += x1 * y2 - x2 * y1; } return a / 2; }
@@ -653,13 +661,67 @@ function delikBuyut(p, pay){ // delik poligonunu merkezinden dışa doğru büy�
   const cx = p.reduce((t, q) => t + q[0], 0) / p.length, cy = p.reduce((t, q) => t + q[1], 0) / p.length;
   return p.map(([x, y]) => { const dx = x - cx, dy = y - cy, l = Math.hypot(dx, dy) || 1; return [x + dx / l * pay, y + dy / l * pay]; });
 }
+// ---- kenar yumuşatma: konturu eşit aralıkla örnekle, kapalı eğri boyunca Gauss ile düzle ----
+let yumMm = 0.8;
+function yumusat(p, sig, ek = 0){
+  const ad = 0.2;                                    // örnek aralığı (mm)
+  const n0 = p.length; if (n0 < 4) return p;
+  const kum = [0]; for (let i = 1; i <= n0; i++){ const a = p[i - 1], b = p[i % n0]; kum.push(kum[i - 1] + Math.hypot(a[0] - b[0], a[1] - b[1])); }
+  const L = kum[n0], N = Math.max(12, Math.round(L / ad)), q = [];
+  for (let k = 0, j = 0; k < N; k++){
+    const s = k * L / N; while (kum[j + 1] < s) j++;
+    const a = p[j], b = p[(j + 1) % n0], t = (s - kum[j]) / ((kum[j + 1] - kum[j]) || 1);
+    q.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+  }
+  const sg = sig / (L / N); if (sg < 0.3) return q;
+  const R = Math.min(Math.floor(N / 2) - 1, Math.ceil(sg * 3)), w = [];
+  for (let i = -R; i <= R; i++) w.push(Math.exp(-i * i / (2 * sg * sg)));
+  const ws = w.reduce((a, b) => a + b, 0);
+  const z = q.map((_, k) => { let x = 0, y = 0; for (let i = -R; i <= R; i++){ const o = q[(k + i + N) % N], g = w[i + R]; x += o[0] * g; y += o[1] * g; } return [x / ws, y / ws]; });
+  // düzleştirme şekli biraz içe çeker; alanı koruyacak kadar dışa it (ek: delik konturu piksel merkezinden geçer, yarım piksel)
+  const a0 = Math.abs(alanIsareti(q)), a1 = Math.abs(alanIsareti(z)), cev = L;
+  const d = (a0 - a1) / cev + ek, yon = alanIsareti(z) > 0 ? 1 : -1;
+  return z.map((pt, k) => { const a = z[(k + N - 1) % N], b = z[(k + 1) % N]; let nx = b[1] - a[1], ny = -(b[0] - a[0]); const l = Math.hypot(nx, ny) || 1; return [pt[0] + nx / l * d * yon, pt[1] + ny / l * d * yon]; });
+}
+function sonHalkalar(){ // STL'de kullanılacak dış hat ve delikler (mm, görüntü yönünde)
+  const pay = Math.max(0, +$('pay').value || 0);
+  const dis = yumMm > 0 ? yumusat(olcum.disHam, yumMm, 0.25 / S) : olcum.dis;
+  const del = olcum.delikler.map(d => delikBuyut(yumMm > 0 ? yumusat(d.ham, Math.min(yumMm, d.cap / 4), 0.5 / S) : d.poly, pay / 2));
+  return { dis, del };
+}
+function onizle(){
+  if (!olcum || $('s4').hidden) return;
+  const { dis, del } = sonHalkalar(), c = $('c3');
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  dis.forEach(([a, b]) => { x0 = Math.min(x0, a); y0 = Math.min(y0, b); x1 = Math.max(x1, a); y1 = Math.max(y1, b); });
+  const CW = 800, pad = 0.12, sw = (x1 - x0) * (1 + 2 * pad), sh = (y1 - y0) * (1 + 2 * pad);
+  const CH = Math.round(Math.min(900, CW * sh / sw)); c.width = CW; c.height = CH;
+  const k = Math.min(CW / sw, CH / sh), ox = (CW - (x1 - x0) * k) / 2, oy = (CH - (y1 - y0) * k) / 2;
+  const x = c.getContext('2d'); x.fillStyle = '#0c0f12'; x.fillRect(0, 0, CW, CH);
+  // 1 mm ızgara (ölçek hissi için)
+  x.strokeStyle = 'rgba(255,255,255,.06)'; x.lineWidth = 1;
+  for (let m = Math.ceil(x0 - 50); m < x1 + 50; m++){ const X = ox + (m - x0) * k; x.globalAlpha = m % 10 ? .5 : 1.6; x.beginPath(); x.moveTo(X, 0); x.lineTo(X, CH); x.stroke(); }
+  for (let m = Math.ceil(y0 - 50); m < y1 + 50; m++){ const Y = oy + (m - y0) * k; x.globalAlpha = m % 10 ? .5 : 1.6; x.beginPath(); x.moveTo(0, Y); x.lineTo(CW, Y); x.stroke(); }
+  x.globalAlpha = 1;
+  const yolP = p => p.forEach(([a, b], i) => { const X = ox + (a - x0) * k, Y = oy + (b - y0) * k; i ? x.lineTo(X, Y) : x.moveTo(X, Y); });
+  x.beginPath(); yolP(dis); x.closePath(); del.forEach(h => { yolP(h); x.closePath(); });
+  x.fillStyle = '#e8ecef'; x.fill('evenodd');
+  x.strokeStyle = '#f5b82e'; x.lineWidth = 2; x.stroke();
+  $('stlBilgi').textContent = `Önizleme: baskıya gidecek şekil (1 mm ızgara). Dış ölçü ${f1(x1 - x0)} × ${f1(y1 - y0)} mm.`;
+}
+$('yum').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  yumMm = +b.dataset.y; $('yum').querySelectorAll('button').forEach(q => q.classList.toggle('on', q === b)); onizle();
+});
+$('pay').addEventListener('input', onizle);
 $('stl').addEventListener('click', () => {
   if (!olcum) return;
   const T = Math.max(0.2, +$('kal').value || 3), pay = Math.max(0, +$('pay').value || 0);
   // görüntü y aşağı → baskı y yukarı (tepeden bakış korunur)
   const cevir = p => p.map(([x, y]) => [x, -y]);
-  let dis = cevir(olcum.dis); if (alanIsareti(dis) < 0) dis.reverse();              // dış: saat yönü tersi
-  const del = olcum.delikler.map(d => { let h = cevir(delikBuyut(d.poly, pay / 2)); if (alanIsareti(h) > 0) h.reverse(); return h; }); // delik: saat yönü
+  const son = sonHalkalar();
+  let dis = cevir(son.dis); if (alanIsareti(dis) < 0) dis.reverse();              // dış: saat yönü tersi
+  const del = son.del.map(p => { let h = cevir(p); if (alanIsareti(h) > 0) h.reverse(); return h; }); // delik: saat yönü
   const halkalar = [dis, ...del];
   const duz2 = [], delikIdx = [];
   halkalar.forEach((h, i) => { if (i) delikIdx.push(duz2.length / 2); h.forEach(q => duz2.push(q[0], q[1])); });
