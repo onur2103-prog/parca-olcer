@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Parça Ölçer</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#14181d">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<style>
+/* Atölye çizim masası: koyu zemin, milimetrik ızgara, kumpas sarısı vurgu */
+:root{
+  --bg:#14181d; --panel:#1d232a; --line:#2c343d; --fg:#e8ecef; --dim:#9aa6b1;
+  --accent:#f5b82e; --ok:#4cc38a; --hole:#4fb3e8; --warn:#ff7a5c;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans)}
+body{
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:24px 24px;background-position:-1px -1px;background-attachment:fixed;
+  min-height:100vh;
+}
+[hidden]{display:none!important}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,label:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:760px;margin:0 auto;padding:calc(16px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) calc(32px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));display:grid;gap:16px}
+header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h1{margin:0;font-size:26px;font-weight:700;letter-spacing:-.01em}
+h1 b{color:var(--accent);font-weight:700}
+.ver{font-family:var(--mono);font-size:12px;color:var(--dim)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:grid;gap:12px}
+.step{font-family:var(--mono);font-size:12px;letter-spacing:.12em;color:var(--accent)}
+h2{margin:0;font-size:18px}
+p{margin:0;color:var(--dim);line-height:1.5}
+ul.tips{margin:0;padding-left:18px;color:var(--dim);line-height:1.6;font-size:14px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:48px;padding:0 18px;border-radius:10px;border:0;background:var(--accent);color:#1b1404;font-weight:700;font-size:16px}
+.btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.btn:disabled{opacity:.5;cursor:default}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.row > *{flex:1 1 auto}
+.stage{position:relative;width:100%;border-radius:8px;overflow:hidden;background:#0c0f12;touch-action:none}
+.stage canvas{display:block;width:100%;height:auto}
+.handle{position:absolute;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;border:3px solid var(--accent);background:rgba(245,184,46,.18);touch-action:none;cursor:grab}
+.handle::after{content:"";position:absolute;left:50%;top:50%;width:4px;height:4px;margin:-2px;border-radius:50%;background:var(--accent)}
+.status{font-size:14px;color:var(--dim);display:flex;gap:8px;align-items:center}
+.status.err{color:var(--warn)}
+.status.ok{color:var(--ok)}
+.spin{width:16px;height:16px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sp .8s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+.dims{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.dim{border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.dim .k{font-size:12px;color:var(--dim);letter-spacing:.06em}
+.dim .v{font-family:var(--mono);font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:2px}
+.dim .v small{font-size:13px;color:var(--dim);font-weight:500}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line)}
+th{color:var(--dim);font-weight:600;font-size:12px;letter-spacing:.06em}
+td.n{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.field{display:grid;gap:6px;font-size:13px;color:var(--dim)}
+.field input[type=number]{background:#11161b;border:1px solid var(--line);border-radius:8px;color:var(--fg);font-family:var(--mono);font-size:17px;padding:10px 12px;width:100%}
+.field input[type=range]{width:100%;accent-color:var(--accent)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg button{border:0;background:none;padding:10px 14px;font-size:14px;color:var(--dim)}
+.seg button.on{background:var(--accent);color:#1b1404;font-weight:700}
+.note{font-size:13px;color:var(--dim);border-left:3px solid var(--accent);padding:4px 0 4px 10px}
+footer{font-size:12px;color:var(--dim);text-align:center}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:2s}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Parça <b>Ölçer</b></h1>
+    <span class="ver">A4 referanslı · mm</span>
+  </header>
+
+  <!-- 1: fotoğraf -->
+  <section class="card" id="s1">
+    <span class="step">ADIM 1</span>
+    <h2>Parçayı A4 kâğıda koy, tepeden çek</h2>
+    <ul class="tips">
+      <li>Parça kâğıdın tamamen içinde olsun, kâğıdın <b>4 köşesi de</b> görünsün.</li>
+      <li>Telefonu parçanın tam üstünde tut, gölgesiz ve aydınlık bir yerde çek.</li>
+      <li>Kâğıdın altı koyu bir zemin olsun (masa, kumaş). Beyaz parça için renkli kâğıt kullan.</li>
+    </ul>
+    <div class="row">
+      <label class="btn" for="foto">📷 Fotoğraf çek / seç</label>
+      <input id="foto" type="file" accept="image/*" hidden>
+    </div>
+    <div class="status" id="cvDurum"><div class="spin"></div>Ölçüm motoru yükleniyor (ilk açılışta ~10 MB)…</div>
+  </section>
+
+  <!-- 2: köşeler -->
+  <section class="card" id="s2" hidden>
+    <span class="step">ADIM 2</span>
+    <h2>Kâğıdın köşelerini kontrol et</h2>
+    <p>Sarı noktalar kâğıdın 4 köşesinde olmalı. Yanlışsa sürükleyip düzelt.</p>
+    <div class="stage" id="stage1"><canvas id="c1"></canvas></div>
+    <div class="row">
+      <span class="seg" id="kagit"><button data-k="a4" class="on">A4</button><button data-k="a5">A5</button><button data-k="ozel">Özel</button></span>
+      <button class="btn" id="olc">Ölç</button>
+    </div>
+    <div class="row" id="ozelAlan" hidden>
+      <label class="field">Kısa kenar (mm)<input type="number" id="ozelK" value="148" min="20" max="600" step="0.5"></label>
+      <label class="field">Uzun kenar (mm)<input type="number" id="ozelU" value="210" min="20" max="600" step="0.5"></label>
+    </div>
+    <p class="note" id="ozelNot" hidden>A4 yoksa ölçüsünü bildiğin herhangi bir dikdörtgen olur: defter, karton, kutu kapağı, fayans. Kenarlarını cetvelle ölçüp yaz; ne kadar doğru ölçersen sonuç o kadar doğru çıkar.</p>
+    <div class="status" id="kDurum"></div>
+  </section>
+
+  <!-- 3: sonuç -->
+  <section class="card" id="s3" hidden>
+    <span class="step">ADIM 3</span>
+    <h2>Ölçüler</h2>
+    <div class="dims" id="dims"></div>
+    <div class="stage" id="stage2"><canvas id="c2"></canvas></div>
+    <p style="font-size:13px">İki noktaya dokun, aradaki mesafeyi ölçer. Üçüncü dokunuş yeni ölçüm başlatır.</p>
+    <div class="field">
+      <span>Algılama hassasiyeti: <b id="hasV">40</b> (parça eksik çıkarsa artır, gölge parçaya karışırsa azalt)</span>
+      <input type="range" id="has" min="10" max="90" value="40">
+    </div>
+    <div id="delikTablo"></div>
+  </section>
+
+  <!-- 4: STL -->
+  <section class="card" id="s4" hidden>
+    <span class="step">ADIM 4</span>
+    <h2>Düz parçayı STL olarak indir</h2>
+    <p>Bulunan dış hat ve delikler, verdiğin kalınlıkta katı bir parçaya çevrilir. Conta, pul, plaka, kapak gibi düz parçalar için.</p>
+    <div class="row">
+      <label class="field">Kalınlık (mm)<input type="number" id="kal" value="3" min="0.4" max="100" step="0.2"></label>
+      <label class="field">Delik payı (mm)<input type="number" id="pay" value="0.2" min="0" max="2" step="0.1"></label>
+    </div>
+    <p class="note">Delik payı, baskıda deliklerin biraz dar çıkmasını telafi eder. Dış hat aynı kalır.</p>
+    <button class="btn" id="stl">STL indir</button>
+  </section>
+
+  <footer>Hassasiyet yaklaşık ±0,5–1 mm. Kritik ölçüleri kumpasla doğrula.</footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/earcut@2.2.4/dist/earcut.min.js"></script>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const S = 4;                 // düzeltilmiş görüntüde 1 mm = 4 piksel
+const KAGIT = { a4: [210, 297], a5: [148, 210] };
+const kagitOlcu = () => {
+  if (kagit !== 'ozel') return KAGIT[kagit];
+  const a = +$('ozelK').value || 148, b = +$('ozelU').value || 210;
+  return [Math.min(a, b), Math.max(a, b)];
+};
+let kagit = 'a4';
+let cvHazir = false;
+let img = null;              // yüklenen fotoğraf (canvas)
+let kose = [];               // 4 köşe, fotoğraf pikselinde
+let duz = null;              // düzeltilmiş görüntü (cv.Mat RGBA)
+let olcum = null;            // son ölçüm sonucu
+let dokun = [];              // elle ölçüm noktaları (mm)
+
+// ---------- OpenCV yükleme ----------
+(function yukle(){
+  const s = document.createElement('script');
+  s.src = 'https://docs.opencv.org/4.9.0/opencv.js'; s.async = true;
+  s.onload = async () => {
+    try {
+      if (window.cv instanceof Promise) window.cv = await window.cv;
+      else if (!window.cv.Mat) await new Promise(r => { window.cv.onRuntimeInitialized = r; });
+      cvHazir = true;
+      durum('cvDurum', 'Ölçüm motoru hazır.', 'ok');
+      if (img) kagitBul();
+    } catch (e){ durum('cvDurum', 'Ölçüm motoru başlatılamadı. Sayfayı yenile.', 'err'); }
+  };
+  s.onerror = () => durum('cvDurum', 'Ölçüm motoru indirilemedi. İnternet bağlantını kontrol edip sayfayı yenile.', 'err');
+  document.head.appendChild(s);
+})();
+function durum(id, m, tip, spin){
+  const el = $(id); el.className = 'status' + (tip ? ' ' + tip : '');
+  el.innerHTML = (spin ? '<div class="spin"></div>' : '') + m;
+}
+
+// ---------- 1: fotoğraf ----------
+$('foto').addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return;
+  const bmp = await createImageBitmap(f, { imageOrientation: 'from-image' }).catch(() => null);
+  let w, h, kaynak = bmp;
+  if (!bmp){ // eski tarayıcı
+    kaynak = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = URL.createObjectURL(f); });
+  }
+  w = kaynak.width; h = kaynak.height;
+  const k = Math.min(1, 1800 / Math.max(w, h));
+  img = document.createElement('canvas'); img.width = Math.round(w * k); img.height = Math.round(h * k);
+  img.getContext('2d').drawImage(kaynak, 0, 0, img.width, img.height);
+  $('s2').hidden = false; $('s3').hidden = true; $('s4').hidden = true;
+  kose = varsayilanKose();
+  ciz1();
+  if (cvHazir) kagitBul(); else durum('kDurum', 'Ölçüm motoru yüklenince köşeler otomatik bulunacak…', '', true);
+  $('s2').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  e.target.value = '';
+});
+function varsayilanKose(){
+  const w = img.width, h = img.height, m = 0.15;
+  return [[w * m, h * m], [w * (1 - m), h * m], [w * (1 - m), h * (1 - m)], [w * m, h * (1 - m)]];
+}
+
+// ---------- 2: kâğıdı bul ----------
+function kagitBul(){
+  const src = cv.imread(img), gray = new cv.Mat(), bin = new cv.Mat();
+  const conts = new cv.MatVector(), hier = new cv.Mat();
+  try {
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    cv.GaussianBlur(gray, gray, new cv.Size(7, 7), 0);
+    cv.threshold(gray, bin, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
+    const ker = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(9, 9));
+    cv.morphologyEx(bin, bin, cv.MORPH_OPEN, ker); ker.delete();
+    cv.findContours(bin, conts, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+    let enIyi = null, enAlan = 0;
+    const toplam = img.width * img.height;
+    for (let i = 0; i < conts.size(); i++){
+      const c = conts.get(i); const a = cv.contourArea(c);
+      if (a > enAlan && a > toplam * 0.08){ enAlan = a; enIyi = c; } else c.delete();
+    }
+    if (!enIyi){ durum('kDurum', 'Kâğıt otomatik bulunamadı. Sarı noktaları kâğıdın köşelerine sürükle.', 'err'); return; }
+    const hull = new cv.Mat(); cv.convexHull(enIyi, hull, false, true);
+    const per = cv.arcLength(hull, true);
+    let pts = null;
+    for (const eps of [0.02, 0.03, 0.04, 0.06, 0.08, 0.1]){
+      const ap = new cv.Mat(); cv.approxPolyDP(hull, ap, eps * per, true);
+      if (ap.rows === 4){ pts = []; for (let i = 0; i < 4; i++) pts.push([ap.data32S[i * 2], ap.data32S[i * 2 + 1]]); ap.delete(); break; }
+      ap.delete();
+    }
+    hull.delete(); enIyi.delete();
+    if (!pts){ durum('kDurum', 'Kâğıdın köşeleri net değil. Sarı noktaları köşelere sürükle.', 'err'); return; }
+    kose = sirala(pts);
+    ciz1();
+    durum('kDurum', 'Kâğıt bulundu. Köşeler doğruysa "Ölç"e bas.', 'ok');
+  } catch (e){
+    durum('kDurum', 'Köşe bulma hata verdi. Noktaları elle yerleştir.', 'err');
+  } finally { src.delete(); gray.delete(); bin.delete(); conts.delete(); hier.delete(); }
+}
+function sirala(p){ // sol-üst, sağ-üst, sağ-alt, sol-alt
+  const s = p.map(q => q[0] + q[1]), d = p.map(q => q[0] - q[1]);
+  return [p[s.indexOf(Math.min(...s))], p[d.indexOf(Math.max(...d))], p[s.indexOf(Math.max(...s))], p[d.indexOf(Math.min(...d))]];
+}
+function ciz1(){
+  const c = $('c1'); c.width = img.width; c.height = img.height;
+  const x = c.getContext('2d'); x.drawImage(img, 0, 0);
+  x.strokeStyle = '#f5b82e'; x.lineWidth = Math.max(2, img.width / 400);
+  x.beginPath(); kose.forEach((p, i) => i ? x.lineTo(p[0], p[1]) : x.moveTo(p[0], p[1])); x.closePath(); x.stroke();
+  const st = $('stage1'); st.querySelectorAll('.handle').forEach(h => h.remove());
+  kose.forEach((p, i) => {
+    const h = document.createElement('div'); h.className = 'handle'; h.dataset.i = i; h.tabIndex = 0;
+    h.style.left = p[0] / img.width * 100 + '%'; h.style.top = p[1] / img.height * 100 + '%';
+    st.appendChild(h);
+  });
+}
+$('stage1').addEventListener('pointerdown', e => {
+  const h = e.target.closest('.handle'); if (!h) return;
+  e.preventDefault(); h.setPointerCapture(e.pointerId);
+  const i = +h.dataset.i, r = $('stage1').getBoundingClientRect();
+  const tasi = ev => {
+    const x = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)), y = Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height));
+    kose[i] = [x * img.width, y * img.height]; h.style.left = x * 100 + '%'; h.style.top = y * 100 + '%';
+  };
+  const birak = () => { h.removeEventListener('pointermove', tasi); h.removeEventListener('pointerup', birak); h.removeEventListener('pointercancel', birak); kose = sirala(kose); ciz1(); };
+  h.addEventListener('pointermove', tasi); h.addEventListener('pointerup', birak); h.addEventListener('pointercancel', birak);
+});
+$('kagit').addEventListener('click', e => {
+  const b = e.target.closest('[data-k]'); if (!b) return;
+  kagit = b.dataset.k; [...$('kagit').children].forEach(x => x.classList.toggle('on', x === b));
+  $('ozelAlan').hidden = $('ozelNot').hidden = kagit !== 'ozel';
+  try { localStorage.setItem('po-kagit', JSON.stringify({ kagit, k: $('ozelK').value, u: $('ozelU').value })); } catch(e){}
+});
+['ozelK', 'ozelU'].forEach(id => $(id).addEventListener('change', () => {
+  try { localStorage.setItem('po-kagit', JSON.stringify({ kagit, k: $('ozelK').value, u: $('ozelU').value })); } catch(e){}
+}));
+try { // son seçimi hatırla
+  const k = JSON.parse(localStorage.getItem('po-kagit') || 'null');
+  if (k){ $('ozelK').value = k.k; $('ozelU').value = k.u; const b = $('kagit').querySelector(`[data-k="${k.kagit}"]`); if (b) b.click(); }
+} catch(e){}
+
+// ---------- 3: ölç ----------
+$('olc').addEventListener('click', () => {
+  if (!cvHazir){ durum('kDurum', 'Ölçüm motoru hâlâ yükleniyor, birkaç saniye bekle.', '', true); return; }
+  duzelt(); olc();
+  $('s3').hidden = false; $('s4').hidden = !olcum;
+  $('s3').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+function duzelt(){
+  const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  const yatay = (d(kose[0], kose[1]) + d(kose[3], kose[2])) / 2, dikey = (d(kose[0], kose[3]) + d(kose[1], kose[2])) / 2;
+  let [kw, kh] = kagitOlcu(); if (yatay > dikey) [kw, kh] = [kh, kw];  const W = Math.round(kw * S), H = Math.round(kh * S);
+  const src = cv.imread(img);
+  const a = cv.matFromArray(4, 1, cv.CV_32FC2, kose.flat());
+  const b = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, W, 0, W, H, 0, H]);
+  const M = cv.getPerspectiveTransform(a, b);
+  if (duz) duz.delete();
+  duz = new cv.Mat();
+  cv.warpPerspective(src, duz, M, new cv.Size(W, H), cv.INTER_LINEAR, cv.BORDER_REPLICATE);
+  src.delete(); a.delete(); b.delete(); M.delete();
+}
+function olc(){
+  const delta = +$('has').value;
+  const W = duz.cols, H = duz.rows;
+  const gray = new cv.Mat(), hsv = new cv.Mat(), rgb = new cv.Mat(), m1 = new cv.Mat(), m2 = new cv.Mat();
+  const ch = new cv.MatVector(), conts = new cv.MatVector(), hier = new cv.Mat();
+  olcum = null; dokun = [];
+  try {
+    cv.cvtColor(duz, gray, cv.COLOR_RGBA2GRAY);
+    cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
+    // kâğıdın parlaklığı: kenar şeridinden ortanca
+    const ornek = [];
+    for (let y = 6 * S; y < H - 6 * S; y += 7) for (const x of [6 * S, W - 6 * S]) ornek.push(gray.ucharPtr(y, x)[0]);
+    for (let x = 6 * S; x < W - 6 * S; x += 7) for (const y of [6 * S, H - 6 * S]) ornek.push(gray.ucharPtr(y, x)[0]);
+    ornek.sort((p, q) => p - q);
+    const kagitP = ornek[Math.floor(ornek.length / 2)];
+    cv.threshold(gray, m1, Math.max(0, kagitP - delta), 255, cv.THRESH_BINARY_INV);
+    // kenar düzeltmesi: koyu parçada eşiği kâğıt ile parça parlaklığının tam ortasına al
+    // (bulanık kenar ve gölge parçayı olduğundan büyük göstermesin)
+    const parcaP = cv.mean(gray, m1)[0];
+    if (cv.countNonZero(m1) > (5 * S) ** 2 && kagitP - parcaP > 60)
+      cv.threshold(gray, m1, (kagitP + parcaP) / 2, 255, cv.THRESH_BINARY_INV);
+    cv.cvtColor(duz, rgb, cv.COLOR_RGBA2RGB); cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV);
+    cv.split(hsv, ch); const sat = ch.get(1);
+    cv.threshold(sat, m2, 40 + delta, 255, cv.THRESH_BINARY); sat.delete();
+    cv.bitwise_or(m1, m2, m1);
+    // kâğıt kenarından 4 mm içerisini yok say
+    const kn = 4 * S;
+    cv.rectangle(m1, new cv.Point(0, 0), new cv.Point(W - 1, kn), new cv.Scalar(0), -1);
+    cv.rectangle(m1, new cv.Point(0, H - 1 - kn), new cv.Point(W - 1, H - 1), new cv.Scalar(0), -1);
+    cv.rectangle(m1, new cv.Point(0, 0), new cv.Point(kn, H - 1), new cv.Scalar(0), -1);
+    cv.rectangle(m1, new cv.Point(W - 1 - kn, 0), new cv.Point(W - 1, H - 1), new cv.Scalar(0), -1);
+    const k3 = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5, 5));
+    cv.morphologyEx(m1, m1, cv.MORPH_OPEN, k3);
+    cv.morphologyEx(m1, m1, cv.MORPH_CLOSE, k3); k3.delete();
+    cv.findContours(m1, conts, hier, cv.RETR_CCOMP, cv.CHAIN_APPROX_NONE);
+    let dis = -1, alan = 0;
+    for (let i = 0; i < conts.size(); i++){
+      if (hier.intPtr(0, i)[3] !== -1) continue;
+      const c = conts.get(i); const a = cv.contourArea(c); c.delete();
+      if (a > alan){ alan = a; dis = i; }
+    }
+    if (dis < 0 || alan < (5 * S) ** 2){ sonucYok(); return; }
+    const dc = conts.get(dis);
+    const rr = cv.minAreaRect(dc);
+    const br = cv.boundingRect(dc);
+    const delikler = [];
+    for (let i = hier.intPtr(0, dis)[2]; i !== -1; i = hier.intPtr(0, i)[0]){
+      const c = conts.get(i); const a = cv.contourArea(c);
+      if (a > (1.2 * S) ** 2){
+        let cx, cy, cap, oval = false;
+        if (c.rows >= 5){
+          const e = cv.fitEllipse(c); cx = e.center.x; cy = e.center.y;
+          cap = (e.size.width + e.size.height) / 2; oval = Math.abs(e.size.width - e.size.height) / cap > 0.12;
+        } else { const m = cv.minEnclosingCircle(c); cx = m.center.x; cy = m.center.y; cap = m.radius * 2; }
+        delikler.push({ x: cx / S, y: cy / S, cap: cap / S, oval, poly: poli(c, 0.12) });
+      }
+      c.delete();
+    }
+    delikler.sort((p, q) => p.y - q.y || p.x - q.x);
+    olcum = {
+      en: Math.max(rr.size.width, rr.size.height) / S, boy: Math.min(rr.size.width, rr.size.height) / S,
+      bx: br.width / S, by: br.height / S, alan: (alan - delikler.reduce((t, d) => t + Math.PI * (d.cap / 2) ** 2 * S * S, 0)) / (S * S),
+      aci: rr.angle, rr, dis: poli(dc, 0.12), delikler, kagitP,
+    };
+    dc.delete();
+    goster();
+  } catch (e){
+    console.error(e); sonucYok('Ölçüm sırasında hata oldu. Hassasiyeti değiştirip tekrar dene.');
+  } finally { gray.delete(); hsv.delete(); rgb.delete(); m1.delete(); m2.delete(); ch.delete(); conts.delete(); hier.delete(); }
+}
+function poli(c, epsMm){ // kontur → sadeleştirilmiş nokta listesi (mm)
+  const ap = new cv.Mat(); cv.approxPolyDP(c, ap, epsMm * S, true);
+  const p = []; for (let i = 0; i < ap.rows; i++) p.push([ap.data32S[i * 2] / S, ap.data32S[i * 2 + 1] / S]);
+  ap.delete(); return p;
+}
+function sonucYok(m){
+  olcum = null; $('s4').hidden = true;
+  $('dims').innerHTML = `<div class="dim" style="grid-column:1/-1"><div class="k">SONUÇ</div><div class="v" style="font-size:16px;font-family:var(--sans)">${m || 'Kâğıdın üstünde parça bulunamadı. Hassasiyeti artır ya da parçayı daha kontrastlı bir kâğıda koy.'}</div></div>`;
+  $('delikTablo').innerHTML = ''; ciz2();
+}
+const f1 = v => v.toLocaleString('tr-TR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+function goster(){
+  const o = olcum;
+  $('dims').innerHTML = `
+    <div class="dim"><div class="k">UZUNLUK</div><div class="v">${f1(o.en)} <small>mm</small></div></div>
+    <div class="dim"><div class="k">GENİŞLİK</div><div class="v">${f1(o.boy)} <small>mm</small></div></div>
+    <div class="dim"><div class="k">DELİK</div><div class="v">${o.delikler.length} <small>adet</small></div></div>
+    <div class="dim"><div class="k">YÜZEY ALANI</div><div class="v">${f1(o.alan / 100)} <small>cm²</small></div></div>`;
+  if (o.delikler.length){
+    let satir = o.delikler.map((d, i) => {
+      // en yakın komşu delik
+      let yak = null, yd = 1e9;
+      o.delikler.forEach((e, j) => { if (j !== i){ const m = Math.hypot(d.x - e.x, d.y - e.y); if (m < yd){ yd = m; yak = j; } } });
+      return `<tr><td>D${i + 1}</td><td class="n">Ø ${f1(d.cap)}${d.oval ? ' <span style="color:var(--warn)">oval</span>' : ''}</td><td class="n">${yak === null ? '–' : 'D' + (yak + 1) + ': ' + f1(yd)}</td></tr>`;
+    }).join('');
+    $('delikTablo').innerHTML = `<table><thead><tr><th>DELİK</th><th>ÇAP (mm)</th><th>EN YAKIN DELİĞE MERKEZ ARASI (mm)</th></tr></thead><tbody>${satir}</tbody></table>`;
+  } else $('delikTablo').innerHTML = '';
+  ciz2();
+}
+function ciz2(){
+  const c = $('c2'); c.width = duz.cols; c.height = duz.rows;
+  cv.imshow(c, duz);
+  const x = c.getContext('2d');
+  x.fillStyle = 'rgba(10,14,18,.35)'; x.fillRect(0, 0, c.width, c.height);
+  // milimetrik ızgara (10 mm)
+  x.strokeStyle = 'rgba(255,255,255,.08)'; x.lineWidth = 1;
+  for (let m = 10; m * S < c.width; m += 10){ x.beginPath(); x.moveTo(m * S, 0); x.lineTo(m * S, c.height); x.stroke(); }
+  for (let m = 10; m * S < c.height; m += 10){ x.beginPath(); x.moveTo(0, m * S); x.lineTo(c.width, m * S); x.stroke(); }
+  const yazi = (t, px, py, renk) => {
+    x.font = '600 26px "IBM Plex Mono", monospace'; const w = x.measureText(t).width;
+    x.fillStyle = 'rgba(12,15,18,.85)'; x.fillRect(px - w / 2 - 8, py - 20, w + 16, 32);
+    x.fillStyle = renk; x.textAlign = 'center'; x.fillText(t, px, py + 6);
+  };
+  const o = olcum;
+  if (o){
+    x.lineWidth = 4; x.strokeStyle = '#4cc38a';
+    yol(x, o.dis); x.stroke();
+    x.strokeStyle = '#4fb3e8'; x.lineWidth = 3;
+    o.delikler.forEach(d => { yol(x, d.poly); x.stroke(); });
+    // döndürülmüş kutu ve ölçü çizgileri
+    const v = cv.RotatedRect.points(o.rr);
+    x.setLineDash([10, 8]); x.strokeStyle = 'rgba(245,184,46,.8)'; x.lineWidth = 2;
+    x.beginPath(); v.forEach((p, i) => i ? x.lineTo(p.x, p.y) : x.moveTo(p.x, p.y)); x.closePath(); x.stroke(); x.setLineDash([]);
+    const kenar = [[v[0], v[1]], [v[1], v[2]]].map(([a, b]) => ({ a, b, l: Math.hypot(a.x - b.x, a.y - b.y) / S }));
+    kenar.forEach(k => yazi(f1(k.l) + ' mm', (k.a.x + k.b.x) / 2, (k.a.y + k.b.y) / 2, '#f5b82e'));
+    o.delikler.forEach((d, i) => yazi(`D${i + 1} Ø${f1(d.cap)}`, d.x * S, d.y * S - d.cap * S / 2 - 26, '#4fb3e8'));
+  }
+  // elle ölçüm
+  x.fillStyle = '#ff7a5c'; x.strokeStyle = '#ff7a5c'; x.lineWidth = 3;
+  dokun.forEach(p => { x.beginPath(); x.arc(p[0] * S, p[1] * S, 9, 0, 7); x.fill(); });
+  if (dokun.length === 2){
+    const [a, b] = dokun; x.beginPath(); x.moveTo(a[0] * S, a[1] * S); x.lineTo(b[0] * S, b[1] * S); x.stroke();
+    yazi(f1(Math.hypot(a[0] - b[0], a[1] - b[1])) + ' mm', (a[0] + b[0]) / 2 * S, (a[1] + b[1]) / 2 * S - 30, '#ff7a5c');
+  }
+}
+function yol(x, p){ x.beginPath(); p.forEach((q, i) => i ? x.lineTo(q[0] * S, q[1] * S) : x.moveTo(q[0] * S, q[1] * S)); x.closePath(); }
+$('c2').addEventListener('click', e => {
+  if (!duz) return;
+  const r = $('c2').getBoundingClientRect();
+  const p = [(e.clientX - r.left) / r.width * duz.cols / S, (e.clientY - r.top) / r.height * duz.rows / S];
+  dokun = dokun.length >= 2 ? [p] : [...dokun, p]; ciz2();
+});
+let hz;
+$('has').addEventListener('input', () => { $('hasV').textContent = $('has').value; clearTimeout(hz); hz = setTimeout(() => { if (duz){ olc(); $('s4').hidden = !olcum; } }, 250); });
+
+// ---------- 4: STL ----------
+function alanIsareti(p){ let a = 0; for (let i = 0; i < p.length; i++){ const [x1, y1] = p[i], [x2, y2] = p[(i + 1) % p.length]; a += x1 * y2 - x2 * y1; } return a / 2; }
+function delikBuyut(p, pay){ // delik poligonunu merkezinden dışa doğru büyüt
+  const cx = p.reduce((t, q) => t + q[0], 0) / p.length, cy = p.reduce((t, q) => t + q[1], 0) / p.length;
+  return p.map(([x, y]) => { const dx = x - cx, dy = y - cy, l = Math.hypot(dx, dy) || 1; return [x + dx / l * pay, y + dy / l * pay]; });
+}
+$('stl').addEventListener('click', () => {
+  if (!olcum) return;
+  const T = Math.max(0.2, +$('kal').value || 3), pay = Math.max(0, +$('pay').value || 0);
+  // görüntü y aşağı → baskı y yukarı (tepeden bakış korunur)
+  const cevir = p => p.map(([x, y]) => [x, -y]);
+  let dis = cevir(olcum.dis); if (alanIsareti(dis) < 0) dis.reverse();              // dış: saat yönü tersi
+  const del = olcum.delikler.map(d => { let h = cevir(delikBuyut(d.poly, pay / 2)); if (alanIsareti(h) > 0) h.reverse(); return h; }); // delik: saat yönü
+  const halkalar = [dis, ...del];
+  const duz2 = [], delikIdx = [];
+  halkalar.forEach((h, i) => { if (i) delikIdx.push(duz2.length / 2); h.forEach(q => duz2.push(q[0], q[1])); });
+  const tri = earcut(duz2, delikIdx, 2);
+  const ucgen = [];
+  const P = (i, z) => [duz2[i * 2], duz2[i * 2 + 1], z];
+  for (let i = 0; i < tri.length; i += 3){
+    let [a, b, c] = [tri[i], tri[i + 1], tri[i + 2]];
+    const ax = duz2[a * 2], ay = duz2[a * 2 + 1], bx = duz2[b * 2], by = duz2[b * 2 + 1], cx = duz2[c * 2], cy = duz2[c * 2 + 1];
+    if ((bx - ax) * (cy - ay) - (by - ay) * (cx - ax) < 0) [b, c] = [c, b];   // üst yüz +z
+    ucgen.push([P(a, T), P(b, T), P(c, T)], [P(a, 0), P(c, 0), P(b, 0)]);
+  }
+  halkalar.forEach(h => {
+    for (let i = 0; i < h.length; i++){
+      const a = h[i], b = h[(i + 1) % h.length];
+      const a0 = [a[0], a[1], 0], b0 = [b[0], b[1], 0], a1 = [a[0], a[1], T], b1 = [b[0], b[1], T];
+      ucgen.push([a0, b0, b1], [a0, b1, a1]);
+    }
+  });
+  // parçayı tablaya ortala
+  let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
+  dis.forEach(([x, y]) => { mnx = Math.min(mnx, x); mny = Math.min(mny, y); mxx = Math.max(mxx, x); mxy = Math.max(mxy, y); });
+  const ox = (mnx + mxx) / 2, oy = (mny + mxy) / 2;
+  const buf = new ArrayBuffer(84 + ucgen.length * 50), dv = new DataView(buf);
+  const baslik = 'Parca Olcer STL'; for (let i = 0; i < baslik.length; i++) dv.setUint8(i, baslik.charCodeAt(i));
+  dv.setUint32(80, ucgen.length, true);
+  let o = 84;
+  ucgen.forEach(t => {
+    const [p, q, r] = t;
+    const u = [q[0] - p[0], q[1] - p[1], q[2] - p[2]], v = [r[0] - p[0], r[1] - p[1], r[2] - p[2]];
+    let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    const l = Math.hypot(...n) || 1; n = n.map(k => k / l);
+    n.forEach(k => { dv.setFloat32(o, k, true); o += 4; });
+    t.forEach(pt => { dv.setFloat32(o, pt[0] - ox, true); dv.setFloat32(o + 4, pt[1] - oy, true); dv.setFloat32(o + 8, pt[2], true); o += 12; });
+    o += 2;
+  });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buf], { type: 'model/stl' }));
+  a.download = `parca_${Math.round(olcum.en)}x${Math.round(olcum.boy)}x${T}mm.stl`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+});
+</script>
+</body>
+</html>
