@@ -258,9 +258,23 @@ function kagitBul(){
       if (ap.rows === 4){ pts = []; for (let i = 0; i < 4; i++) pts.push([ap.data32S[i * 2], ap.data32S[i * 2 + 1]]); ap.delete(); break; }
       ap.delete();
     }
+    const konturAlan = enAlan;
     hull.delete(); enIyi.delete();
     if (!pts){ durum('kDurum', 'Kâğıdın köşeleri net değil. Sarı noktaları köşelere sürükle.', 'err'); return; }
-    kose = sirala(pts);
+    // Bulunan şekil gerçekten bir kâğıt mı? (ışık lekesi / kenara taşan zemin olmasın)
+    const q = sirala(pts), L = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+    const ust = L(q[0], q[1]), alt = L(q[3], q[2]), sol = L(q[0], q[3]), sag = L(q[1], q[2]);
+    let qa = 0; for (let i = 0; i < 4; i++){ const [x1, y1] = q[i], [x2, y2] = q[(i + 1) % 4]; qa += x1 * y2 - x2 * y1; } qa = Math.abs(qa / 2);
+    const m = Math.max(4, img.width * 0.006);
+    const kenarda = q.filter(([x, y]) => x < m || y < m || x > img.width - m || y > img.height - m).length;
+    const yamuk = Math.max(ust, alt) / Math.min(ust, alt) > 1.45 || Math.max(sol, sag) / Math.min(sol, sag) > 1.45;
+    const uyumsuz = konturAlan / qa < 0.88;
+    if (kenarda >= 2 || yamuk || uyumsuz){
+      kose = varsayilanKose(); ciz1();
+      durum('kDurum', 'Fotoğrafta kâğıt bulunamadı. Ölçü için bilinen boyda bir kâğıt (ör. A4) gerekli: parçayı kâğıdın üstüne koy, kâğıdın 4 köşesi de fotoğrafta görünecek şekilde çek. Kâğıt varsa sarı noktaları köşelerine sürükle.', 'err');
+      return;
+    }
+    kose = q;
     ciz1();
     durum('kDurum', 'Kâğıt bulundu. Köşeler doğruysa "Ölç"e bas.', 'ok');
   } catch (e){
@@ -413,7 +427,7 @@ function olc(){
     const delikler = [];
     for (let i = hier.intPtr(0, dis)[2]; i !== -1; i = hier.intPtr(0, i)[0]){
       let c = conts.get(i); const a = cv.contourArea(c);
-      if (a > (1.2 * S) ** 2){
+      if (a > (1.2 * S) ** 2 && gercekDelik(c, a, lab, W, [kL, kA, kB], parcaRenk)){
         if (parcaRenk){ labOnbellek = hsv; labParca = parcaRenk; c = delikInce(c); }
         let cx, cy, cap, oval = false, ea = 0, eb = 0;
         if (c.rows >= 5){
@@ -437,6 +451,27 @@ function olc(){
   } catch (e){
     console.error(e); sonucYok('Ölçüm sırasında hata oldu. Hassasiyeti değiştirip tekrar dene. (' + (e && e.message ? e.message : (typeof e === 'number' && cv.exceptionFromPtr ? cv.exceptionFromPtr(e).msg : e)) + ')');
   } finally { gray.delete(); hsv.delete(); rgb.delete(); m1.delete(); m2.delete(); ch.delete(); conts.delete(); hier.delete(); }
+}
+// Parçanın üstündeki parlama/yansıma delik sanılmasın: gerçek delik dolgun (dışbükeye yakın) olur
+// ve içinden zemin görünür; zemin renkliyse (kahverengi karton vb.) deliğin içi de o renk tonundadır.
+function gercekDelik(c, a, lab, W, kagitRenk, parcaRenk){
+  const hull = new cv.Mat(); cv.convexHull(c, hull, false, true);
+  const dolgunluk = a / Math.max(1, cv.contourArea(hull)); hull.delete();
+  if (dolgunluk < 0.85) return false;
+  if (!parcaRenk) return true;
+  const kA = kagitRenk[1] - 128, kB = kagitRenk[2] - 128, pA = parcaRenk[1] - 128, pB = parcaRenk[2] - 128;
+  const kC = Math.hypot(kA, kB), pC = Math.hypot(pA, pB);
+  if (kC < 8 || pC > kC * 0.5) return true;          // renk tonu ayırt ettirmiyor: sadece şekle bak
+  const r = cv.boundingRect(c), A = [], B = [], adim = Math.max(1, Math.round(Math.sqrt(r.width * r.height / 400)));
+  for (let y = r.y; y < r.y + r.height; y += adim) for (let x = r.x; x < r.x + r.width; x += adim){
+    if (cv.pointPolygonTest(c, new cv.Point(x, y), true) < 1) continue;
+    const i = (y * W + x) * 3; A.push(lab[i + 1] - 128); B.push(lab[i + 2] - 128);
+  }
+  if (A.length < 4) return true;
+  const md = v => { v.sort((p, q) => p - q); return v[v.length >> 1]; };
+  const hA = md(A), hB = md(B), hC = Math.hypot(hA, hB);
+  const aci = Math.acos(Math.max(-1, Math.min(1, (hA * kA + hB * kB) / Math.max(1e-6, hC * kC))));
+  return hC > kC * 0.3 && aci < 0.7;
 }
 // Deliği kendi rengine göre yeniden ayır: deliğin içi (gölgeli zemin) kâğıttan koyu olabilir,
 // bu yüzden genel eşik deliği büyük gösterir. Delik içi rengi ile parça rengi arasının ortasını kullan.
