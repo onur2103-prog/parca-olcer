@@ -359,21 +359,33 @@ function olc(){
     // Kâğıdın rengini kenar şeridinden öğren; o renkten farklı olan her şey parçadır.
     // (beyaz, kahverengi karton, renkli kâğıt fark etmez)
     cv.cvtColor(duz, rgb, cv.COLOR_RGBA2RGB);
+    // Milimetrik/kareli kâğıdın ince çizgilerini sil (≈0,6 mm'den ince koyu/renkli çizgiler):
+    // her renk kanalında kapama işlemi, çizgiyi çevresindeki kâğıt rengine boyar. Parçanın kendisi etkilenmez.
+    const kc = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(Math.round(0.6 * S) | 1, Math.round(0.6 * S) | 1));
+    cv.morphologyEx(rgb, rgb, cv.MORPH_CLOSE, kc); kc.delete();
     cv.GaussianBlur(rgb, rgb, new cv.Size(5, 5), 0);
     cv.cvtColor(rgb, hsv, cv.COLOR_RGB2Lab);           // hsv değişkeni burada Lab tutar
     const lab = hsv.data, N = W * H;
-    const oL = [], oA = [], oB = [];
-    const al = (x, y) => { const i = (y * W + x) * 3; oL.push(lab[i]); oA.push(lab[i + 1]); oB.push(lab[i + 2]); };
-    for (let y = 6 * S; y < H - 6 * S; y += 5) { al(6 * S, y); al(W - 6 * S, y); }
-    for (let x = 6 * S; x < W - 6 * S; x += 5) { al(x, 6 * S); al(x, H - 6 * S); }
+    // Kâğıt rengini kenara farklı uzaklıktaki halkalardan öğren: milimetrik kâğıtta kenar boşluğu beyaz,
+    // çizgili alan uzaktan renkli görünür; ikisi de "kâğıt" sayılmalı.
     const med = a => { a.sort((p, q) => p - q); return a[Math.floor(a.length / 2)]; };
-    const kL = med(oL), kA = med(oA), kB = med(oB);
-    // renk farkı haritası (parlaklık farkına daha az ağırlık: ışık eğimi ve gölge)
-    const fark = new Uint8Array(N);
-    for (let p = 0, i = 0; p < N; p++, i += 3){
-      const dL = (lab[i] - kL) * 0.6, dA = lab[i + 1] - kA, dB = lab[i + 2] - kB;
-      fark[p] = Math.min(255, Math.sqrt(dL * dL + dA * dA + dB * dB) * 1.6);
+    const halka = mm => {
+      const d = Math.round(mm * S), oL = [], oA = [], oB = [];
+      const al = (x, y) => { const i = (y * W + x) * 3; oL.push(lab[i]); oA.push(lab[i + 1]); oB.push(lab[i + 2]); };
+      for (let y = d; y < H - d; y += 5) { al(d, y); al(W - d, y); }
+      for (let x = d; x < W - d; x += 5) { al(x, d); al(x, H - d); }
+      return [med(oL), med(oA), med(oB)];
+    };
+    const kagitlar = [halka(6)];
+    for (const mm of [16, 26]){
+      const r = halka(mm);
+      if (!kagitlar.some(k => Math.hypot((k[0] - r[0]) * 0.6, k[1] - r[1], k[2] - r[2]) < 4)) kagitlar.push(r);
     }
+    const [kL, kA, kB] = kagitlar[0];
+    // kâğıt renklerinin herhangi birine uzaklık (parlaklık farkına daha az ağırlık: ışık eğimi ve gölge)
+    const kDist = i => { let m = 1e9; for (const k of kagitlar){ const dL = (lab[i] - k[0]) * 0.6, dA = lab[i + 1] - k[1], dB = lab[i + 2] - k[2]; const v = dL * dL + dA * dA + dB * dB; if (v < m) m = v; } return m; };
+    const fark = new Uint8Array(N);
+    for (let p = 0, i = 0; p < N; p++, i += 3) fark[p] = Math.min(255, Math.sqrt(kDist(i)) * 1.6);
     const esik0 = delta;
     // kenar düzeltmesi: eşiği kâğıt ile parçanın ortasına al (bulanık kenar parçayı büyütmesin)
     let top = 0, say = 0;
@@ -395,7 +407,7 @@ function olc(){
       const rL = med(pL), rA = med(pA), rB = med(pB); parcaRenk = [rL, rA, rB];
       if (Math.sqrt(((rL - kL) * 0.6) ** 2 + (rA - kA) ** 2 + (rB - kB) ** 2) < 6) break; // renkler ayrışmıyor
       for (let p = 0, i = 0; p < N; p++, i += 3){
-        const dK = dist(i, kL, kA, kB);
+        const dK = kDist(i);
         ikili[p] = (dist(i, rL, rA, rB) < dK && dK > taban2 * taban2) ? 255 : 0;
       }
     }
@@ -476,6 +488,21 @@ function gercekDelik(c, a, lab, W, kagitRenk, parcaRenk){
 // Deliği kendi rengine göre yeniden ayır: deliğin içi (gölgeli zemin) kâğıttan koyu olabilir,
 // bu yüzden genel eşik deliği büyük gösterir. Delik içi rengi ile parça rengi arasının ortasını kullan.
 function delikInce(c){
+  // Deliği birkaç adımda büyüterek bul: ilk kontur çok küçük kaldıysa (gölgeli/renkli delik içi) her adımda
+  // yeni sınırdan devam et. Mantıksız sonuçta ilk kontura geri dön.
+  const kok = cv.contourArea(c);
+  let simdi = c.clone();
+  for (let tur = 0; tur < 4; tur++){
+    const s = delikAdim(simdi);
+    if (s.hata){ simdi.delete(); return c; }
+    simdi.delete(); simdi = s.c;
+    if (!s.devam) break;
+    if (cv.contourArea(simdi) > kok * 6){ simdi.delete(); return c; }
+    if (tur === 3){ simdi.delete(); return c; }   // hâlâ büyüyor: parçaya taşıyor
+  }
+  c.delete(); return simdi;
+}
+function delikAdim(c){
   const W = duz.cols, H = duz.rows, m = 2 * S, r = cv.boundingRect(c);
   const x0 = Math.max(0, r.x - m), y0 = Math.max(0, r.y - m), x1 = Math.min(W, r.x + r.width + m), y1 = Math.min(H, r.y + r.height + m);
   const w = x1 - x0, h = y1 - y0;
@@ -485,11 +512,13 @@ function delikInce(c){
     cv.drawContours(ic, vec, 0, new cv.Scalar(255), -1, cv.LINE_8, new cv.Mat(), 0, new cv.Point(-x0, -y0));
     const kd = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(Math.round(3 * S) | 1, Math.round(3 * S) | 1));
     cv.dilate(ic, dis, kd); kd.delete();
-    const ke = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(Math.round(1.5 * S) | 1, Math.round(1.5 * S) | 1));
+    // iç rengi kenardan uzakta öğren; küçük ilk konturda aşındırma her şeyi silmesin
+    const ae = Math.max(1, Math.min(Math.round(1.5 * S), Math.round(Math.min(r.width, r.height) * 0.3))) | 1;
+    const ke = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(ae, ae));
     cv.erode(ic, ic, ke); ke.delete();
     const lab = labOnbellek.data, L = [], A = [], B = [];
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (ic.ucharPtr(y, x)[0]){ const i = ((y + y0) * W + x + x0) * 3; L.push(lab[i]); A.push(lab[i + 1]); B.push(lab[i + 2]); }
-    if (L.length < 6) return c;
+    if (L.length < 6) return { hata: true };
     const md = a => { a.sort((p, q) => p - q); return a[a.length >> 1]; };
     const hL = md(L), hA = md(A), hB = md(B), [pL, pA, pB] = labParca;
     const d = (i, l, a, b) => ((lab[i] - l) * 0.6) ** 2 + (lab[i + 1] - a) ** 2 + (lab[i + 2] - b) ** 2;
@@ -503,8 +532,12 @@ function delikInce(c){
     let en = -1, ea = 0;
     for (let k = 0; k < cs.size(); k++){ const t = cs.get(k), a = cv.contourArea(t); if (a > ea){ ea = a; en = k; } t.delete(); }
     const a0 = cv.contourArea(c);
-    if (en < 0 || ea < a0 * 0.5 || ea > a0 * 1.6) return c;   // mantıksız sonuç: eskisini kullan
-    c.delete(); return cs.get(en).clone();
+    // Delik rengi parçadan belirgin farklı mı? Öyleyse sınıra dayanan sonuç büyümeye devam edebilir.
+    const ayrik = Math.sqrt(((hL - pL) * 0.6) ** 2 + (hA - pA) ** 2 + (hB - pB) ** 2) > 20;
+    if (en < 0 || ea < a0 * 0.5) return { hata: true };
+    const sinirda = ea > cv.countNonZero(dis) * 0.6;   // izin verilen bölgeyi dolduruyor: daha büyük olabilir
+    if (!ayrik && ea > a0 * 1.6) return { hata: true };
+    return { c: cs.get(en).clone(), devam: ayrik && sinirda };
   } finally { ic.delete(); dis.delete(); vec.delete(); cs.delete(); hh.delete(); }
 }
 function hamNokta(c){ const p = []; for (let i = 0; i < c.rows; i++) p.push([c.data32S[i * 2] / S, c.data32S[i * 2 + 1] / S]); return p; }
