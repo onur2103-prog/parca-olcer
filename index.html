@@ -69,6 +69,11 @@ td.n{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .seg button{border:0;background:none;padding:10px 14px;font-size:14px;color:var(--dim)}
 .seg button.on{background:var(--accent);color:#1b1404;font-weight:700}
 .note{font-size:13px;color:var(--dim);border-left:3px solid var(--accent);padding:4px 0 4px 10px}
+.tools{display:flex;gap:8px;flex-wrap:wrap}
+.tb{min-width:44px;min-height:44px;padding:0 12px;border-radius:10px;border:1px solid var(--line);background:#11161b;color:var(--fg);font-size:15px}
+.tb.wide{flex:1 1 auto}
+.tb.on{border-color:var(--accent);color:var(--accent)}
+.zoomV{position:absolute;right:8px;top:8px;font-family:var(--mono);font-size:12px;background:rgba(12,15,18,.8);color:var(--dim);padding:3px 7px;border-radius:6px;pointer-events:none}
 footer{font-size:12px;color:var(--dim);text-align:center}
 @media (prefers-reduced-motion:reduce){.spin{animation-duration:2s}}
 </style>
@@ -119,8 +124,16 @@ footer{font-size:12px;color:var(--dim);text-align:center}
     <span class="step">ADIM 3</span>
     <h2>Ölçüler</h2>
     <div class="dims" id="dims"></div>
-    <div class="stage" id="stage2"><canvas id="c2"></canvas></div>
-    <p style="font-size:13px">İki noktaya dokun, aradaki mesafeyi ölçer. Üçüncü dokunuş yeni ölçüm başlatır.</p>
+    <div class="tools">
+      <button class="tb" id="zArti" aria-label="Yakınlaştır" style="font-size:22px">+</button>
+      <button class="tb" id="zEksi" aria-label="Uzaklaştır" style="font-size:22px">−</button>
+      <button class="tb wide" id="zParca">Parçaya odaklan</button>
+      <button class="tb wide" id="zTum">Tüm kâğıt</button>
+      <button class="tb wide on" id="tYazi" aria-pressed="true">Yazılar</button>
+      <button class="tb wide on" id="tCizgi" aria-pressed="true">Çizgiler</button>
+    </div>
+    <div class="stage" id="stage2"><canvas id="c2"></canvas><span class="zoomV" id="zoomV"></span></div>
+    <p style="font-size:13px">İki parmakla büyüt, tek parmakla kaydır. Kısa dokunuşla iki nokta seç, aradaki mesafeyi ölçer. Yeşil çizginin parçanın kenarına oturduğunu kontrol etmek için <b>Yazılar</b>'ı kapatıp yakınlaş.</p>
     <div class="field">
       <span>Algılama hassasiyeti: <b id="hasV">25</b> (parça eksik çıkarsa azalt, zemin lekeleri parçaya karışırsa artır)</span>
       <input type="range" id="has" min="5" max="80" value="25">
@@ -162,6 +175,9 @@ let kose = [];               // 4 köşe, fotoğraf pikselinde
 let duz = null;              // düzeltilmiş görüntü (cv.Mat RGBA)
 let olcum = null;            // son ölçüm sonucu
 let dokun = [];              // elle ölçüm noktaları (mm)
+let gorus = null;            // sonuç görünümünde gösterilen bölge (düzeltilmiş px): {x, y, w}
+let taban = null;            // düzeltilmiş görüntünün canvas kopyası
+let yaziAcik = true, cizgiAcik = true;
 
 // ---------- OpenCV yükleme ----------
 (function yukle(){
@@ -288,7 +304,7 @@ try { // son seçimi hatırla
 $('olc').addEventListener('click', () => {
   if (!cvHazir){ durum('kDurum', 'Ölçüm motoru hâlâ yükleniyor, birkaç saniye bekle.', '', true); return; }
   duzelt(); olc();
-  $('s3').hidden = false; $('s4').hidden = !olcum;
+  $('s3').hidden = false; $('s4').hidden = !olcum; ciz2();
   $('s3').scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 function duzelt(){
@@ -303,6 +319,7 @@ function duzelt(){
   duz = new cv.Mat();
   cv.warpPerspective(src, duz, M, new cv.Size(W, H), cv.INTER_LINEAR, cv.BORDER_REPLICATE);
   src.delete(); a.delete(); b.delete(); M.delete();
+  gorus = null; taban = null;
 }
 function olc(){
   const delta = +$('has').value;
@@ -416,49 +433,160 @@ function goster(){
   } else $('delikTablo').innerHTML = '';
   ciz2();
 }
+// ---- sonuç görünümü: yakınlaştırma, kaydırma, etiketler ----
+const oran = () => duz.rows / duz.cols;
+function sinirla(){
+  const W = duz.cols, H = duz.rows;
+  gorus.w = Math.min(W, Math.max(12 * S, gorus.w));
+  const h = gorus.w * oran();
+  gorus.x = Math.min(W - gorus.w, Math.max(0, gorus.x));
+  gorus.y = Math.min(H - h, Math.max(0, gorus.y));
+}
+function odakla(){
+  const W = duz.cols, H = duz.rows;
+  if (!olcum){ gorus = { x: 0, y: 0, w: W }; return; }
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  olcum.dis.forEach(([a, b]) => { x0 = Math.min(x0, a); y0 = Math.min(y0, b); x1 = Math.max(x1, a); y1 = Math.max(y1, b); });
+  const bw = (x1 - x0) * S, bh = (y1 - y0) * S;
+  const w = Math.max(40 * S, Math.max(bw, bh / oran()) * 1.9);
+  gorus = { x: (x0 + x1) / 2 * S - w / 2, y: (y0 + y1) / 2 * S - w * oran() / 2, w };
+  sinirla();
+}
+function yakinlas(f, sx, sy){ // f>1 büyüt; (sx,sy) görünüm içindeki 0..1 konum
+  const px = gorus.x + sx * gorus.w, py = gorus.y + sy * gorus.w * oran();
+  gorus.w /= f; gorus.x = px - sx * gorus.w; gorus.y = py - sy * gorus.w * oran();
+  sinirla(); ciz2();
+}
+let cizBekle = false;
 function ciz2(){
-  const c = $('c2'); c.width = duz.cols; c.height = duz.rows;
-  cv.imshow(c, duz);
+  if (!duz) return;
+  const c = $('c2');
+  if (!taban){ taban = document.createElement('canvas'); cv.imshow(taban, duz); }
+  if (!gorus) odakla();
+  const CW = 1200; c.width = CW; c.height = Math.round(CW * oran());
+  const k = CW / gorus.w;                          // düzeltilmiş px → canvas px
+  const u = CW / (c.clientWidth || 400);           // 1 ekran (css) pikseli = u canvas px
+  const P = (mx, my) => [(mx * S - gorus.x) * k, (my * S - gorus.y) * k]; // mm → canvas
   const x = c.getContext('2d');
-  x.fillStyle = 'rgba(10,14,18,.35)'; x.fillRect(0, 0, c.width, c.height);
-  // milimetrik ızgara (10 mm)
-  x.strokeStyle = 'rgba(255,255,255,.08)'; x.lineWidth = 1;
-  for (let m = 10; m * S < c.width; m += 10){ x.beginPath(); x.moveTo(m * S, 0); x.lineTo(m * S, c.height); x.stroke(); }
-  for (let m = 10; m * S < c.height; m += 10){ x.beginPath(); x.moveTo(0, m * S); x.lineTo(c.width, m * S); x.stroke(); }
-  const yazi = (t, px, py, renk) => {
-    x.font = '600 26px "IBM Plex Mono", monospace'; const w = x.measureText(t).width;
-    x.fillStyle = 'rgba(12,15,18,.85)'; x.fillRect(px - w / 2 - 8, py - 20, w + 16, 32);
-    x.fillStyle = renk; x.textAlign = 'center'; x.fillText(t, px, py + 6);
+  x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
+  x.drawImage(taban, gorus.x, gorus.y, gorus.w, gorus.w * oran(), 0, 0, c.width, c.height);
+  $('zoomV').textContent = (duz.cols / gorus.w).toFixed(1).replace('.', ',') + '×';
+  // ızgara: 10 mm, yeterince yakınsa 1 mm
+  const izgara = (adim, renk) => {
+    x.strokeStyle = renk; x.lineWidth = Math.max(1, u * 0.6);
+    const m0x = Math.ceil(gorus.x / S / adim) * adim, m0y = Math.ceil(gorus.y / S / adim) * adim;
+    for (let m = m0x; m * S < gorus.x + gorus.w; m += adim){ const X = P(m, 0)[0]; x.beginPath(); x.moveTo(X, 0); x.lineTo(X, c.height); x.stroke(); }
+    for (let m = m0y; m * S < gorus.y + gorus.w * oran(); m += adim){ const Y = P(0, m)[1]; x.beginPath(); x.moveTo(0, Y); x.lineTo(c.width, Y); x.stroke(); }
   };
+  if (k * S / u >= 6) izgara(1, 'rgba(255,255,255,.07)');
+  izgara(10, 'rgba(255,255,255,.18)');
+
+  const kutular = [];   // yerleşmiş etiketler (çakışmasın)
+  const cakisir = r => kutular.some(q => r.x < q.x + q.w && r.x + r.w > q.x && r.y < q.y + q.h && r.y + r.h > q.y);
+  const etiket = (t, adaylar, renk) => {
+    x.font = `600 ${Math.round(13 * u)}px "IBM Plex Mono", monospace`;
+    const w = x.measureText(t).width + 12 * u, h = 22 * u;
+    let r = null;
+    for (const [cx, cy] of adaylar){
+      const a = { x: Math.min(c.width - w - 2, Math.max(2, cx - w / 2)), y: Math.min(c.height - h - 2, Math.max(2, cy - h / 2)), w, h };
+      if (!cakisir(a)){ r = a; break; }
+      if (!r) r = a;
+    }
+    kutular.push(r);
+    x.fillStyle = 'rgba(12,15,18,.82)'; x.fillRect(r.x, r.y, r.w, r.h);
+    x.fillStyle = renk; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(t, r.x + r.w / 2, r.y + r.h / 2 + u);
+  };
+  const yolC = p => { x.beginPath(); p.forEach((q, i) => { const [X, Y] = P(q[0], q[1]); i ? x.lineTo(X, Y) : x.moveTo(X, Y); }); x.closePath(); };
+
   const o = olcum;
-  if (o){
-    x.lineWidth = 4; x.strokeStyle = '#4cc38a';
-    yol(x, o.dis); x.stroke();
-    x.strokeStyle = '#4fb3e8'; x.lineWidth = 3;
-    o.delikler.forEach(d => { yol(x, d.poly); x.stroke(); });
-    // döndürülmüş kutu ve ölçü çizgileri
-    const v = cv.RotatedRect.points(o.rr);
-    x.setLineDash([10, 8]); x.strokeStyle = 'rgba(245,184,46,.8)'; x.lineWidth = 2;
-    x.beginPath(); v.forEach((p, i) => i ? x.lineTo(p.x, p.y) : x.moveTo(p.x, p.y)); x.closePath(); x.stroke(); x.setLineDash([]);
-    const kenar = [[v[0], v[1]], [v[1], v[2]]].map(([a, b]) => ({ a, b, l: Math.hypot(a.x - b.x, a.y - b.y) / S }));
-    kenar.forEach(k => yazi(f1(k.l) + ' mm', (k.a.x + k.b.x) / 2, (k.a.y + k.b.y) / 2, '#f5b82e'));
-    o.delikler.forEach((d, i) => yazi(`D${i + 1} Ø${f1(d.cap)}`, d.x * S, d.y * S - d.cap * S / 2 - 26, '#4fb3e8'));
+  if (o && cizgiAcik){
+    x.lineWidth = 1.5 * u; x.strokeStyle = 'rgba(76,195,138,.95)'; yolC(o.dis); x.stroke();
+    x.strokeStyle = 'rgba(79,179,232,.95)'; o.delikler.forEach(d => { yolC(d.poly); x.stroke(); });
+    const v = cv.RotatedRect.points(o.rr).map(p => P(p.x / S, p.y / S));
+    x.setLineDash([6 * u, 5 * u]); x.strokeStyle = 'rgba(245,184,46,.75)'; x.lineWidth = 1.2 * u;
+    x.beginPath(); v.forEach((p, i) => i ? x.lineTo(p[0], p[1]) : x.moveTo(p[0], p[1])); x.closePath(); x.stroke(); x.setLineDash([]);
+  }
+  if (o && yaziAcik){
+    const v = cv.RotatedRect.points(o.rr).map(p => P(p.x / S, p.y / S));
+    const mx = v.reduce((t, p) => t + p[0], 0) / 4, my = v.reduce((t, p) => t + p[1], 0) / 4;
+    [[v[0], v[1]], [v[1], v[2]]].forEach(([a, b]) => {
+      const ox = (a[0] + b[0]) / 2, oy = (a[1] + b[1]) / 2, l = Math.hypot(a[0] - b[0], a[1] - b[1]) / k / S;
+      const dx = ox - mx, dy = oy - my, dl = Math.hypot(dx, dy) || 1;  // kutunun dışına doğru it
+      etiket(f1(l) + ' mm', [26, 50, 75].map(s => [ox + dx / dl * s * u, oy + dy / dl * s * u]), '#f5b82e');
+    });
+    o.delikler.forEach((d, i) => {
+      const [X, Y] = P(d.x, d.y), r = d.cap / 2 * S * k + 16 * u;
+      etiket(`D${i + 1} Ø${f1(d.cap)}`, [[X, Y - r], [X, Y + r], [X + r * 1.8, Y], [X - r * 1.8, Y], [X, Y - r - 26 * u], [X, Y + r + 26 * u]], '#4fb3e8');
+    });
   }
   // elle ölçüm
-  x.fillStyle = '#ff7a5c'; x.strokeStyle = '#ff7a5c'; x.lineWidth = 3;
-  dokun.forEach(p => { x.beginPath(); x.arc(p[0] * S, p[1] * S, 9, 0, 7); x.fill(); });
+  x.strokeStyle = '#ff7a5c'; x.lineWidth = 1.5 * u;
+  dokun.forEach(p => { const [X, Y] = P(p[0], p[1]), s = 9 * u;
+    x.beginPath(); x.moveTo(X - s, Y); x.lineTo(X + s, Y); x.moveTo(X, Y - s); x.lineTo(X, Y + s); x.stroke();
+    x.beginPath(); x.arc(X, Y, 3.5 * u, 0, 7); x.stroke(); });
   if (dokun.length === 2){
-    const [a, b] = dokun; x.beginPath(); x.moveTo(a[0] * S, a[1] * S); x.lineTo(b[0] * S, b[1] * S); x.stroke();
-    yazi(f1(Math.hypot(a[0] - b[0], a[1] - b[1])) + ' mm', (a[0] + b[0]) / 2 * S, (a[1] + b[1]) / 2 * S - 30, '#ff7a5c');
+    const [a, b] = dokun, A = P(a[0], a[1]), B = P(b[0], b[1]);
+    x.beginPath(); x.moveTo(A[0], A[1]); x.lineTo(B[0], B[1]); x.stroke();
+    const ox = (A[0] + B[0]) / 2, oy = (A[1] + B[1]) / 2;
+    etiket(f1(Math.hypot(a[0] - b[0], a[1] - b[1])) + ' mm', [[ox, oy - 22 * u], [ox, oy + 22 * u]], '#ff7a5c');
   }
 }
-function yol(x, p){ x.beginPath(); p.forEach((q, i) => i ? x.lineTo(q[0] * S, q[1] * S) : x.moveTo(q[0] * S, q[1] * S)); x.closePath(); }
-$('c2').addEventListener('click', e => {
+function cizSonra(){ if (cizBekle) return; cizBekle = true; requestAnimationFrame(() => { cizBekle = false; ciz2(); }); }
+
+// dokunma: iki parmak = büyüt, tek parmak sürükle = kaydır, kısa dokunuş = ölçüm noktası
+const parmak = new Map(); let hareket = 0, ikiliOldu = false, oncekiIki = null;
+const c2 = $('c2');
+const yerel = e => { const r = c2.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; };
+c2.addEventListener('pointerdown', e => {
   if (!duz) return;
-  const r = $('c2').getBoundingClientRect();
-  const p = [(e.clientX - r.left) / r.width * duz.cols / S, (e.clientY - r.top) / r.height * duz.rows / S];
-  dokun = dokun.length >= 2 ? [p] : [...dokun, p]; ciz2();
+  c2.setPointerCapture(e.pointerId); parmak.set(e.pointerId, [e.clientX, e.clientY]);
+  if (parmak.size === 1){ hareket = 0; ikiliOldu = false; }
+  if (parmak.size === 2){ ikiliOldu = true; oncekiIki = null; }
 });
+c2.addEventListener('pointermove', e => {
+  if (!parmak.has(e.pointerId) || !gorus) return;
+  const r = c2.getBoundingClientRect(), [ex, ey] = parmak.get(e.pointerId);
+  const dx = e.clientX - ex, dy = e.clientY - ey;
+  parmak.set(e.pointerId, [e.clientX, e.clientY]);
+  if (parmak.size >= 2){
+    const [p, q] = [...parmak.values()];
+    const m = Math.hypot(p[0] - q[0], p[1] - q[1]), cx = (p[0] + q[0]) / 2, cy = (p[1] + q[1]) / 2;
+    if (oncekiIki){
+      const f = m / oncekiIki.m, sx = (cx - r.left) / r.width, sy = (cy - r.top) / r.height;
+      const px = gorus.x + sx * gorus.w, py = gorus.y + sy * gorus.w * oran();
+      gorus.w /= f; gorus.x = px - sx * gorus.w; gorus.y = py - sy * gorus.w * oran();
+      gorus.x -= (cx - oncekiIki.cx) / r.width * gorus.w; gorus.y -= (cy - oncekiIki.cy) / r.height * gorus.w * oran();
+      sinirla(); cizSonra();
+    }
+    oncekiIki = { m, cx, cy };
+  } else {
+    hareket += Math.hypot(dx, dy);
+    if (hareket > 8){
+      gorus.x -= dx / r.width * gorus.w; gorus.y -= dy / r.height * gorus.w * oran();
+      sinirla(); cizSonra();
+    }
+  }
+});
+const birak = e => {
+  if (!parmak.has(e.pointerId)) return;
+  parmak.delete(e.pointerId);
+  if (parmak.size < 2) oncekiIki = null;
+  if (parmak.size === 0 && !ikiliOldu && hareket <= 8 && e.type === 'pointerup' && gorus){
+    const [sx, sy] = yerel(e);
+    const p = [(gorus.x + sx * gorus.w) / S, (gorus.y + sy * gorus.w * oran()) / S];
+    dokun = dokun.length >= 2 ? [p] : [...dokun, p]; ciz2();
+  }
+};
+c2.addEventListener('pointerup', birak); c2.addEventListener('pointercancel', birak);
+c2.addEventListener('wheel', e => { if (!gorus) return; e.preventDefault(); const [sx, sy] = yerel(e); yakinlas(e.deltaY < 0 ? 1.25 : 0.8, sx, sy); }, { passive: false });
+$('zArti').addEventListener('click', () => gorus && yakinlas(1.6, 0.5, 0.5));
+$('zEksi').addEventListener('click', () => gorus && yakinlas(1 / 1.6, 0.5, 0.5));
+$('zParca').addEventListener('click', () => { if (!duz) return; odakla(); ciz2(); });
+$('zTum').addEventListener('click', () => { if (!duz) return; gorus = { x: 0, y: 0, w: duz.cols }; ciz2(); });
+const anahtar = (id, al) => $(id).addEventListener('click', () => { const v = al(); $(id).classList.toggle('on', v); $(id).setAttribute('aria-pressed', v); ciz2(); });
+anahtar('tYazi', () => (yaziAcik = !yaziAcik));
+anahtar('tCizgi', () => (cizgiAcik = !cizgiAcik));
+addEventListener('resize', () => { if (duz && !$('s3').hidden) cizSonra(); });
 let hz;
 $('has').addEventListener('input', () => { $('hasV').textContent = $('has').value; clearTimeout(hz); hz = setTimeout(() => { if (duz){ olc(); $('s4').hidden = !olcum; } }, 250); });
 
